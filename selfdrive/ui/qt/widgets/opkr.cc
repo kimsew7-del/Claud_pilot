@@ -5905,6 +5905,8 @@ OPKRNaviSelect::OPKRNaviSelect() : AbstractControl(tr("Navigation Select"), tr("
     value = value - 1;
     if (value <= -1) {
       value = 5;
+    } else if (value == 2) {
+      value = 1;
     }
     QString values = QString::number(value);
     params.put("OPKRNaviSelect", values.toStdString());
@@ -5916,6 +5918,8 @@ OPKRNaviSelect::OPKRNaviSelect() : AbstractControl(tr("Navigation Select"), tr("
     value = value + 1;
     if (value >= 6) {
       value = 0;
+    } else if (value == 2) {
+      value = 3;
     }
     QString values = QString::number(value);
     params.put("OPKRNaviSelect", values.toStdString());
