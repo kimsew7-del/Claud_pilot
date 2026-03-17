@@ -135,9 +135,10 @@ class DriverStatus():
     self.threshold_pre = self.settings._DISTRACTED_PRE_TIME_TILL_TERMINAL / self.settings._DISTRACTED_TIME
     self.threshold_prompt = self.settings._DISTRACTED_PROMPT_TIME_TILL_TERMINAL / self.settings._DISTRACTED_TIME
 
-    self.MonitorEyesThreshold = float(Decimal(Params().get("OpkrMonitorEyesThreshold", encoding="utf8")) * Decimal('0.01'))
-    self.NormalEyesThreshold = float(Decimal(Params().get("OpkrMonitorNormalEyesThreshold", encoding="utf8")) * Decimal('0.01'))
-    self.BlinkThreshold = float(Decimal(Params().get("OpkrMonitorBlinkThreshold", encoding="utf8")) * Decimal('0.01'))
+    # DM disabled - thresholds kept at defaults for reference only
+    self.MonitorEyesThreshold = float(Decimal('45') * Decimal('0.01'))
+    self.NormalEyesThreshold = float(Decimal('45') * Decimal('0.01'))
+    self.BlinkThreshold = float(Decimal('35') * Decimal('0.01'))
 
     self.monitoring_mode = Params().get_bool("OpkrMonitoringMode")
     self.second1 = 0.0

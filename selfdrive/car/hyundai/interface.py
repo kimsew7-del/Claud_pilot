@@ -3,7 +3,7 @@ from cereal import car
 from panda import Panda
 from common.conversions import Conversions as CV
 from selfdrive.car.hyundai.tunes import LatTunes, LongTunes, set_long_tune, set_lat_tune
-from selfdrive.car.hyundai.values import CAR, EV_CAR, HYBRID_CAR, Buttons, CarControllerParams
+from selfdrive.car.hyundai.values import CAR, EV_CAR, HYBRID_CAR, Buttons, CarControllerParams, get_safe_param  # noqa: F401
 from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness, gen_empty_fingerprint, get_safety_config
 from selfdrive.car.interfaces import CarInterfaceBase
 from selfdrive.car.disable_ecu import disable_ecu
@@ -54,7 +54,7 @@ class CarInterface(CarInterfaceBase):
 
 
     ret.smoothSteer.method = int( Params().get("OpkrSteerMethod", encoding="utf8") )   # 1
-    ret.smoothSteer.maxSteeringAngle = float( Params().get("OpkrMaxSteeringAngle", encoding="utf8") )   # 90
+    ret.smoothSteer.maxSteeringAngle = float(get_safe_param("OpkrMaxSteeringAngle"))   # 90, clamped 70~150
     ret.smoothSteer.maxDriverAngleWait = float( Params().get("OpkrMaxDriverAngleWait", encoding="utf8") )  # 0.002
     ret.smoothSteer.maxSteerAngleWait = float( Params().get("OpkrMaxSteerAngleWait", encoding="utf8") )   # 0.001  # 10 sec
     ret.smoothSteer.driverAngleWait = float( Params().get("OpkrDriverAngleWait", encoding="utf8") )  #0.001
@@ -71,7 +71,10 @@ class CarInterface(CarInterfaceBase):
     ret.steerLimitTimer = 0.8
     tire_stiffness_factor = 1.
 
-    set_long_tune(ret.longitudinalTuning, LongTunes.OPKR)
+    if candidate in HYBRID_CAR or candidate in EV_CAR:
+      set_long_tune(ret.longitudinalTuning, LongTunes.OPKR_HEV)
+    else:
+      set_long_tune(ret.longitudinalTuning, LongTunes.OPKR)
 
     ret.stoppingControl = False
     ret.vEgoStopping = 0.8  # 1.0, 0.5
@@ -90,10 +93,15 @@ class CarInterface(CarInterfaceBase):
     ret.aqValueRaw = 0
 
     params = Params()
-    tire_stiffness_factor = float(Decimal(params.get("TireStiffnessFactorAdj", encoding="utf8")) * Decimal('0.01'))
-    ret.steerActuatorDelay = float(Decimal(params.get("SteerActuatorDelayAdj", encoding="utf8")) * Decimal('0.01'))
-    ret.steerLimitTimer = float(Decimal(params.get("SteerLimitTimerAdj", encoding="utf8")) * Decimal('0.01'))
-    ret.steerRatio = float(Decimal(params.get("SteerRatioAdj", encoding="utf8")) * Decimal('0.01'))
+    tire_stiffness_factor = float(Decimal(str(get_safe_param("TireStiffnessFactorAdj"))) * Decimal('0.01'))
+    ret.steerActuatorDelay = float(Decimal(str(get_safe_param("SteerActuatorDelayAdj"))) * Decimal('0.01'))
+    ret.steerLimitTimer = float(Decimal(str(get_safe_param("SteerLimitTimerAdj"))) * Decimal('0.01'))
+    params_steer_ratio = float(Decimal(str(get_safe_param("SteerRatioAdj"))) * Decimal('0.01'))
+    ret.steerRatio = params_steer_ratio
+
+    # Heavy HEV sedans that benefit from adjusted torque lateral tuning
+    hev_sedan_cars = {CAR.GRANDEUR_HEV_IG, CAR.GRANDEUR_HEV_FL_IG, CAR.K7_HEV_YG,
+                      CAR.GRANDEUR_IG, CAR.GRANDEUR_FL_IG, CAR.K7_YG}
 
     lat_control_method = int(params.get("LateralControlMethod", encoding="utf8"))
     if lat_control_method == 0:
@@ -103,9 +111,12 @@ class CarInterface(CarInterfaceBase):
     elif lat_control_method == 2:
       set_lat_tune(ret.lateralTuning, LatTunes.LQR)
     elif lat_control_method == 3:
-      set_lat_tune(ret.lateralTuning, LatTunes.TORQUE)
+      if candidate in hev_sedan_cars:
+        set_lat_tune(ret.lateralTuning, LatTunes.TORQUE_HEV_SEDAN)
+      else:
+        set_lat_tune(ret.lateralTuning, LatTunes.TORQUE)
     elif lat_control_method == 4:
-      set_lat_tune(ret.lateralTuning, LatTunes.ATOM)    # Hybrid tune  
+      set_lat_tune(ret.lateralTuning, LatTunes.ATOM)    # Hybrid tune
 
     # genesis
     if candidate == CAR.GENESIS_DH:
@@ -179,15 +190,25 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.GRANDEUR_IG:
       ret.mass = 1560. + STD_CARGO_KG
       ret.wheelbase = 2.845
+      ret.steerRatio = 14.5
     elif candidate == CAR.GRANDEUR_HEV_IG:
       ret.mass = 1675. + STD_CARGO_KG
       ret.wheelbase = 2.845
+      ret.steerRatio = 14.5
+      ret.steerActuatorDelay = 0.1
+      ret.longitudinalActuatorDelayLowerBound = 0.5
+      ret.longitudinalActuatorDelayUpperBound = 0.5
     elif candidate == CAR.GRANDEUR_FL_IG:
       ret.mass = 1625. + STD_CARGO_KG
       ret.wheelbase = 2.885
+      ret.steerRatio = 14.5
     elif candidate == CAR.GRANDEUR_HEV_FL_IG:
       ret.mass = 1675. + STD_CARGO_KG
       ret.wheelbase = 2.885
+      ret.steerRatio = 14.5
+      ret.steerActuatorDelay = 0.1
+      ret.longitudinalActuatorDelayLowerBound = 0.5
+      ret.longitudinalActuatorDelayUpperBound = 0.5
     elif candidate == CAR.VELOSTER_JS:
       ret.mass = 1285. + STD_CARGO_KG
       ret.wheelbase = 2.65
@@ -234,9 +255,14 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.K7_YG:
       ret.mass = 1565. + STD_CARGO_KG
       ret.wheelbase = 2.855
+      ret.steerRatio = 16.8
     elif candidate == CAR.K7_HEV_YG:
       ret.mass = 1680. + STD_CARGO_KG
       ret.wheelbase = 2.855
+      ret.steerRatio = 16.8
+      ret.steerActuatorDelay = 0.1
+      ret.longitudinalActuatorDelayLowerBound = 0.5
+      ret.longitudinalActuatorDelayUpperBound = 0.5
     elif candidate == CAR.SELTOS_SP2:
       ret.mass = 1425. + STD_CARGO_KG
       ret.wheelbase = 2.63
@@ -246,6 +272,17 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.MOHAVE_HM:
       ret.mass = 2285. + STD_CARGO_KG
       ret.wheelbase = 2.895
+
+    # Allow Params steerRatio override if user set a non-default value
+    if params_steer_ratio > 0.1:
+      ret.steerRatio = params_steer_ratio
+
+    # HEV/EV optimized stopping parameters (regen braking characteristics)
+    if candidate in HYBRID_CAR or candidate in EV_CAR:
+      ret.vEgoStopping = 0.3
+      ret.vEgoStarting = 0.3
+      ret.stopAccel = -1.5
+      ret.stoppingDecelRate = 0.6
 
     # set appropriate safety param for gas signal
     if candidate in HYBRID_CAR:

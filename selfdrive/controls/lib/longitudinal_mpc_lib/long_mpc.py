@@ -38,8 +38,8 @@ X_EGO_COST = 0.
 V_EGO_COST = 0.
 A_EGO_COST = 0.
 J_EGO_COST = 5.0
-A_CHANGE_COST = 100.      # 낮을수록 선행차에 민강하게 반응. def:0.5
-DANGER_ZONE_COST = 100.
+A_CHANGE_COST = 40.       # Grandeur IG HEV / K7 HEV optimized. lower = more responsive to lead. def:0.5, was:100
+DANGER_ZONE_COST = 50.    # Grandeur IG HEV / K7 HEV optimized. was:100
 CRASH_DISTANCE = .5
 LIMIT_COST = 1e6
 ACADOS_SOLVER_TYPE = 'SQP_RTI'

@@ -287,7 +287,8 @@ class Controls:
       return
 
     self.events.add_from_msg(CS.events)
-    self.events.add_from_msg(self.sm['driverMonitoringState'].events)
+    # DM disabled - do not add driverMonitoringState events
+    # self.events.add_from_msg(self.sm['driverMonitoringState'].events)
 
     # Create events for battery, temperature, disk space, and memory
     if EON and (self.sm['peripheralState'].pandaType != PandaType.uno) and \
@@ -373,12 +374,12 @@ class Controls:
         self.e2e_long_alert_prev = not self.e2e_long_alert_prev
       elif not Params().get_bool("E2ELong"):
         self.e2e_long_alert_prev = True
-      # UnSleep Mode Alert
-      if Params().get_bool("OpkrMonitoringMode") and self.unsleep_mode_alert_prev:
-        self.events.add(EventName.unSleepMode)
-        self.unsleep_mode_alert_prev = not self.unsleep_mode_alert_prev
-      elif not Params().get_bool("OpkrMonitoringMode"):
-        self.unsleep_mode_alert_prev = True
+      # UnSleep Mode Alert - DM disabled, no longer needed
+      # if Params().get_bool("OpkrMonitoringMode") and self.unsleep_mode_alert_prev:
+      #   self.events.add(EventName.unSleepMode)
+      #   self.unsleep_mode_alert_prev = not self.unsleep_mode_alert_prev
+      # elif not Params().get_bool("OpkrMonitoringMode"):
+      #   self.unsleep_mode_alert_prev = True
       # DoNotDisturb Mode Alert
       if Params().get("CommaStockUI", encoding="utf8") == "2" and self.donotdisturb_mode_alert_prev:
         self.events.add(EventName.doNotDisturb)
@@ -1004,8 +1005,8 @@ class Controls:
         self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
         CC.actuatorsOutput = self.last_actuators
 
-    force_decel = (self.sm['driverMonitoringState'].awarenessStatus < 0.) or \
-                  (self.state == State.softDisabling)
+    # DM disabled - only use softDisabling for force_decel
+    force_decel = (self.state == State.softDisabling)
 
     # Curvature & Steering angle
     params = self.sm['liveParameters']

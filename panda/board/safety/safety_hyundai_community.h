@@ -22,12 +22,16 @@ const CanMsg HYUNDAI_COMMUNITY_TX_MSGS[] = {
   {2000, 0, 8},  // SCC_DIAG, Bus 0
 };
 
-// older hyundai models have less checks due to missing counters and checksums
+// Enhanced checks for community safety mode
+// Grandeur IG, K7, and most modern Hyundai/Kia support checksum/counter on 902
+// 916 (TPS) is optional as some Santa Fe models lack it
 AddrCheckStruct hyundai_community_addr_checks[] = {
   {.msg = {{608, 0, 8, .check_checksum = true, .max_counter = 3U, .expected_timestep = 10000U},
            {881, 0, 8, .expected_timestep = 10000U}, { 0 }}},
-  {.msg = {{902, 0, 8, .expected_timestep = 20000U}, { 0 }, { 0 }}},
-  // {.msg = {{916, 0, 8, .expected_timestep = 20000U}}}, some Santa Fe does not have this msg, need to find alternative
+  {.msg = {{902, 0, 8, .check_checksum = true, .max_counter = 15U, .expected_timestep = 20000U},
+           {902, 0, 8, .expected_timestep = 20000U}, { 0 }}},  // fallback without checksum for legacy
+  {.msg = {{1057, 0, 8, .check_checksum = true, .max_counter = 15U, .expected_timestep = 20000U},
+           {1057, 0, 8, .expected_timestep = 20000U}, { 0 }}},  // SCC12 validation for longitudinal
 };
 
 #define HYUNDAI_COMMUNITY_ADDR_CHECK_LEN (sizeof(hyundai_community_addr_checks) / sizeof(hyundai_community_addr_checks[0]))
@@ -200,8 +204,20 @@ static int hyundai_community_tx_hook(CANPacket_t *to_send, bool longitudinal_all
     }
   }
 
+  // SCC messages (longitudinal control): block when controls not allowed
+  // SCC11=1056, SCC12=1057, SCC13=1290, SCC14=905
+  if ((addr == 1056 || addr == 1057 || addr == 1290 || addr == 905) && !controls_allowed) {
+    tx = 0;
+  }
+
+  // FCA (Forward Collision Avoidance): block when controls not allowed
+  // FCA11=909, FCA12=1155
+  if ((addr == 909 || addr == 1155) && !controls_allowed) {
+    tx = 0;
+  }
+
   if (addr == 593) {OP_MDPS_live = 20;}
-  if (addr == 1265 && bus == 1) {OP_CLU_live = 20;} // only count mesage created for MDPS
+  if (addr == 1265 && bus == 1) {OP_CLU_live = 20;} // only count message created for MDPS
   if (addr == 1057) {OP_SCC_live = 20; if (car_SCC_live > 0) {car_SCC_live -= 1;}}
   if (addr == 790) {OP_EMS_live = 20;}
 
@@ -279,6 +295,16 @@ static const addr_checks* hyundai_community_init(uint16_t param) {
   UNUSED(param);
   controls_allowed = false;
   relay_malfunction_reset();
+
+  // Reset live counters on init
+  OP_LKAS_live = 0;
+  OP_MDPS_live = 0;
+  OP_CLU_live = 0;
+  OP_SCC_live = 0;
+  car_SCC_live = 0;
+  OP_EMS_live = 0;
+  HKG_mdps_bus = -1;
+  HKG_scc_bus = -1;
 
   if (current_board->has_obd && HKG_forward_obd) {
     current_board->set_can_mode(CAN_MODE_OBD_CAN2);

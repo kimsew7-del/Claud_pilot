@@ -94,6 +94,11 @@ class PIDController():
 
     self.reset()
 
+  def set_limits(self, pos_limit, neg_limit):
+    """Backported from master: dynamically update PID output limits."""
+    self.pos_limit = pos_limit
+    self.neg_limit = neg_limit
+
   @property
   def k_p(self):
     return interp(self.speed, self._k_p[0], self._k_p[1])

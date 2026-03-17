@@ -9,8 +9,11 @@ from common.params import Params
 from decimal import Decimal
 
 # from chanhojung's idea, parameterized by opkr
+# Clamped to safe range: 5~20 (=0.05~0.20)
 if Params().get("DesiredCurvatureLimit", encoding="utf8") is not None:
-  DESIRED_CURVATURE_LIMIT = float(Decimal(Params().get("DesiredCurvatureLimit", encoding="utf8")) * Decimal('0.01'))
+  _dcl_raw = int(Params().get("DesiredCurvatureLimit", encoding="utf8"))
+  _dcl_clamped = max(5, min(20, _dcl_raw))
+  DESIRED_CURVATURE_LIMIT = float(Decimal(str(_dcl_clamped)) * Decimal('0.01'))
 else:
   DESIRED_CURVATURE_LIMIT = DT_MDL
 

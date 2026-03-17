@@ -8,15 +8,80 @@ from selfdrive.car.docs_definitions import CarInfo, Harness
 from common.params import Params
 Ecu = car.CarParams.Ecu
 
+
+def clamp_param(value, min_val, max_val, default=None):
+  """Clamp a parameter value to safe range. Returns default if provided and value is out of range."""
+  if default is not None and (value < min_val or value > max_val):
+    return default
+  return max(min_val, min(max_val, value))
+
+
+# Safety parameter limits - panda hardware constraints and physical safety bounds
+SAFETY_LIMITS = {
+  # Steering - must match panda HYUNDAI_MAX_STEER=384, MAX_RATE_UP=3, MAX_RATE_DOWN=7
+  "SteerMaxAdj":           {"min": 128, "max": 384, "default": 384},
+  "SteerMaxBaseAdj":       {"min": 128, "max": 384, "default": 384},
+  "SteerDeltaUpAdj":       {"min": 1,   "max": 5,   "default": 3},
+  "SteerDeltaUpBaseAdj":   {"min": 1,   "max": 5,   "default": 3},
+  "SteerDeltaDownAdj":     {"min": 3,   "max": 10,  "default": 7},
+  "SteerDeltaDownBaseAdj": {"min": 3,   "max": 10,  "default": 7},
+  # Steering angle limits
+  "OpkrMaxAngleLimit":     {"min": 70,  "max": 150, "default": 90},
+  "OpkrMaxSteeringAngle":  {"min": 70,  "max": 150, "default": 90},
+  # Steering tuning - physical ranges
+  "SteerRatioAdj":         {"min": 1000, "max": 2500, "default": 1550},
+  "SteerActuatorDelayAdj": {"min": 10,  "max": 80,  "default": 36},
+  "SteerLimitTimerAdj":    {"min": 40,  "max": 150, "default": 100},
+  "TireStiffnessFactorAdj": {"min": 50, "max": 150, "default": 85},
+  # Longitudinal - following distance (x0.1 sec)
+  "CruiseGap1":            {"min": 8,   "max": 20,  "default": 12},
+  "CruiseGap2":            {"min": 10,  "max": 25,  "default": 13},
+  "CruiseGap3":            {"min": 12,  "max": 30,  "default": 14},
+  "CruiseGap4":            {"min": 14,  "max": 40,  "default": 16},
+  "StoppingDist":          {"min": 20,  "max": 60,  "default": 38},
+  "AutoEnableSpeed":       {"min": 5,   "max": 30,  "default": 9},
+  # Torque lateral control
+  "TorqueKp":              {"min": 5,   "max": 30,  "default": 10},
+  "TorqueKi":              {"min": 0,   "max": 10,  "default": 1},
+  "TorqueKf":              {"min": 5,   "max": 25,  "default": 10},
+  "TorqueFriction":        {"min": 0,   "max": 200, "default": 65},
+  "TorqueMaxLatAccel":     {"min": 15,  "max": 40,  "default": 27},
+  # Driver monitoring - removed (DM disabled)
+  # LKAS fault avoidance
+  "AvoidLKASFaultMaxAngle": {"min": 60, "max": 120, "default": 85},
+  "AvoidLKASFaultMaxFrame": {"min": 50, "max": 150, "default": 90},
+  # Curvature
+  "DesiredCurvatureLimit":  {"min": 5,  "max": 20,  "default": 10},
+}
+
+
+def get_safe_param(param_name, encoding="utf8"):
+  """Read a parameter with safety bounds enforcement."""
+  params = Params()
+  raw = params.get(param_name, encoding=encoding)
+  if raw is None:
+    limits = SAFETY_LIMITS.get(param_name)
+    return limits["default"] if limits else 0
+  try:
+    val = int(raw)
+  except (ValueError, TypeError):
+    limits = SAFETY_LIMITS.get(param_name)
+    return limits["default"] if limits else 0
+  limits = SAFETY_LIMITS.get(param_name)
+  if limits:
+    return clamp_param(val, limits["min"], limits["max"], limits["default"])
+  return val
+
+
 # Steer torque limits
 class CarControllerParams:
   ACCEL_MIN = -4.0 # m/s
   ACCEL_MAX = 2.0 # m/s
 
   def __init__(self, CP):
-    self.STEER_MAX = int(Params().get("SteerMaxAdj", encoding="utf8"))  # default 384
-    self.STEER_DELTA_UP = int(Params().get("SteerDeltaUpAdj", encoding="utf8"))  # default 3
-    self.STEER_DELTA_DOWN = int(Params().get("SteerDeltaDownAdj", encoding="utf8"))  # default 7
+    self.STEER_MAX = get_safe_param("SteerMaxAdj")  # default 384, max 384 (panda limit)
+    self.STEER_DELTA_UP = get_safe_param("SteerDeltaUpAdj")  # default 3
+    self.STEER_DELTA_DOWN = get_safe_param("SteerDeltaDownAdj")  # default 7
     self.STEER_DRIVER_ALLOWANCE = 50
     self.STEER_DRIVER_MULTIPLIER = 2
     self.STEER_DRIVER_FACTOR = 1

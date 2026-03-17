@@ -23,27 +23,44 @@ ACCEL_MAX_ISO = 2.0  # m/s^2
 
 def long_control_state_trans(CP, active, long_control_state, v_ego, v_target,
                              v_target_future, brake_pressed, cruise_standstill, stop, gas_pressed):
-  """Update longitudinal control state machine"""
+  """Update longitudinal control state machine
+  Backported from master: added 'starting' state for smoother stop-to-go transitions.
+  """
   accelerating = v_target_future > v_target
   stopping_condition = stop or (v_ego < 2.0 and cruise_standstill) or \
                        (v_ego < CP.vEgoStopping and
                         ((v_target_future < CP.vEgoStopping and not accelerating) or brake_pressed))
 
   starting_condition = v_target_future > CP.vEgoStarting and accelerating and not cruise_standstill or gas_pressed
+  started_condition = v_ego > CP.vEgoStarting
 
   if not active:
     long_control_state = LongCtrlState.off
 
   else:
     if long_control_state == LongCtrlState.off:
-      long_control_state = LongCtrlState.pid
+      if not starting_condition:
+        long_control_state = LongCtrlState.stopping
+      else:
+        if starting_condition and hasattr(CP, 'startingState') and CP.startingState:
+          long_control_state = LongCtrlState.starting
+        else:
+          long_control_state = LongCtrlState.pid
 
     elif long_control_state == LongCtrlState.pid:
       if stopping_condition:
         long_control_state = LongCtrlState.stopping
 
     elif long_control_state == LongCtrlState.stopping:
-      if starting_condition:
+      if starting_condition and hasattr(CP, 'startingState') and CP.startingState:
+        long_control_state = LongCtrlState.starting
+      elif starting_condition:
+        long_control_state = LongCtrlState.pid
+
+    elif long_control_state == LongCtrlState.starting:
+      if stopping_condition:
+        long_control_state = LongCtrlState.stopping
+      elif started_condition:
         long_control_state = LongCtrlState.pid
 
   return long_control_state
@@ -138,6 +155,11 @@ class LongControl():
       self.reset(CS.vEgo)
       output_accel = 0.
 
+    # Backported from master: starting state for smooth stop-to-go
+    elif self.long_control_state == LongCtrlState.starting:
+      output_accel = getattr(CP, 'startAccel', CP.stopAccel + 0.5)
+      self.reset(CS.vEgo)
+
     # tracking objects and driving
     elif self.long_control_state == LongCtrlState.pid:
       self.v_pid = v_target
@@ -148,19 +170,22 @@ class LongControl():
       deadzone = interp(CS.vEgo, CP.longitudinalTuning.deadzoneBP, CP.longitudinalTuning.deadzoneV)
       freeze_integrator = prevent_overshoot
 
-      # opkr
-      # if self.vRel_prev != vRel and vRel <= 0 and CS.vEgo > 13. and self.damping_timer <= 0: # decel mitigation for a while
-      #   if (vRel - self.vRel_prev)*3.6 <= -5:
-      #     self.damping_timer = 2.5*CS.vEgo
-      #     self.damping_timer3 = self.damping_timer
-      #     self.decel_damping2 = interp(abs((vRel - self.vRel_prev)*3.6), [0., 5.], [1., 0.])
-      #   self.vRel_prev = vRel
-      # elif self.damping_timer > 0:
-      #   self.damping_timer -= 1
-      #   self.decel_damping = interp(self.damping_timer, [0., self.damping_timer3], [1., self.decel_damping2])
+      # Decel damping for Grandeur IG HEV / K7 HEV: mitigate harsh braking
+      # when lead vehicle suddenly decelerates at highway speeds.
+      # HEV regenerative braking provides smoother initial decel, so we allow
+      # a minimum 15% brake force to maintain safety while smoothing the rest.
+      if self.vRel_prev != vRel and vRel <= 0 and CS.vEgo > 13. and self.damping_timer <= 0:
+        if (vRel - self.vRel_prev)*3.6 <= -5:
+          self.damping_timer = 2.0*CS.vEgo
+          self.damping_timer3 = self.damping_timer
+          self.decel_damping2 = interp(abs((vRel - self.vRel_prev)*3.6), [0., 5.], [1., 0.15])
+        self.vRel_prev = vRel
+      elif self.damping_timer > 0:
+        self.damping_timer -= 1
+        self.decel_damping = interp(self.damping_timer, [0., self.damping_timer3], [1., self.decel_damping2])
 
       output_accel = self.pid.update(self.v_pid, CS.vEgo, speed=CS.vEgo, deadzone=deadzone, feedforward=a_target, freeze_integrator=freeze_integrator)
-      # output_accel *= self.decel_damping
+      output_accel *= self.decel_damping
 
       if prevent_overshoot or CS.brakeHold:
         output_accel = min(output_accel, 0.0)
@@ -182,6 +207,8 @@ class LongControl():
 
     if self.long_control_state == LongCtrlState.stopping:
       self.long_stat = "STP"
+    elif self.long_control_state == LongCtrlState.starting:
+      self.long_stat = "STR"
     elif self.long_control_state == LongCtrlState.pid:
       self.long_stat = "PID"
     elif self.long_control_state == LongCtrlState.off:

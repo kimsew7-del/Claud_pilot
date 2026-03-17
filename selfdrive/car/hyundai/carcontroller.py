@@ -6,7 +6,7 @@ from selfdrive.car import apply_std_steer_torque_limits
 from selfdrive.car.hyundai.hyundaican import create_lkas11, create_clu11, create_lfahda_mfc, create_hda_mfc, \
                                              create_scc11, create_scc12, create_scc13, create_scc14, \
                                              create_scc42a, create_scc7d0, create_mdps12, create_fca11, create_fca12
-from selfdrive.car.hyundai.values import Buttons, CarControllerParams, CAR, FEATURES
+from selfdrive.car.hyundai.values import Buttons, CarControllerParams, CAR, FEATURES, get_safe_param, clamp_param
 from opendbc.can.packer import CANPacker
 from selfdrive.controls.lib.longcontrol import LongCtrlState
 from selfdrive.car.hyundai.carstate import GearShifter
@@ -102,7 +102,7 @@ class CarController():
     self.opkr_cruise_auto_res_condition = int(self.params.get("AutoResCondition", encoding="utf8"))
 
     self.opkr_turnsteeringdisable = self.params.get_bool("OpkrTurnSteeringDisable")
-    self.opkr_maxanglelimit = float(int(self.params.get("OpkrMaxAngleLimit", encoding="utf8")))
+    self.opkr_maxanglelimit = float(get_safe_param("OpkrMaxAngleLimit"))
     self.ufc_mode_enabled = self.params.get_bool("UFCModeEnabled")
     self.ldws_fix = self.params.get_bool("LdwsCarFix")
     self.radar_helper_option = int(self.params.get("RadarLongHelper", encoding="utf8"))
@@ -111,7 +111,7 @@ class CarController():
     self.auto_res_delay = int(self.params.get("AutoRESDelay", encoding="utf8")) * 100
     self.auto_res_delay_timer = 0
     self.stopped = False
-    self.stoppingdist = float(Decimal(self.params.get("StoppingDist", encoding="utf8"))*Decimal('0.1'))
+    self.stoppingdist = float(Decimal(str(get_safe_param("StoppingDist")))*Decimal('0.1'))
 
     self.longcontrol = CP.openpilotLongitudinalControl
     #self.scc_live is true because CP.radarOffCan is False
@@ -145,12 +145,12 @@ class CarController():
     self.autohold_popup_timer = 0
     self.autohold_popup_switch = False
 
-    self.steerMax_base = int(self.params.get("SteerMaxBaseAdj", encoding="utf8"))
-    self.steerDeltaUp_base = int(self.params.get("SteerDeltaUpBaseAdj", encoding="utf8"))
-    self.steerDeltaDown_base = int(self.params.get("SteerDeltaDownBaseAdj", encoding="utf8"))
-    self.steerMax_Max = int(self.params.get("SteerMaxAdj", encoding="utf8"))
-    self.steerDeltaUp_Max = int(self.params.get("SteerDeltaUpAdj", encoding="utf8"))
-    self.steerDeltaDown_Max = int(self.params.get("SteerDeltaDownAdj", encoding="utf8"))
+    self.steerMax_base = get_safe_param("SteerMaxBaseAdj")
+    self.steerDeltaUp_base = get_safe_param("SteerDeltaUpBaseAdj")
+    self.steerDeltaDown_base = get_safe_param("SteerDeltaDownBaseAdj")
+    self.steerMax_Max = get_safe_param("SteerMaxAdj")
+    self.steerDeltaUp_Max = get_safe_param("SteerDeltaUpAdj")
+    self.steerDeltaDown_Max = get_safe_param("SteerDeltaDownAdj")
     self.model_speed_range = [30, 100, 255]
     self.steerMax_range = [self.steerMax_Max, self.steerMax_base, self.steerMax_base]
     self.steerDeltaUp_range = [self.steerDeltaUp_Max, self.steerDeltaUp_base, self.steerDeltaUp_base]
@@ -180,8 +180,8 @@ class CarController():
     self.change_accel_fast = False
 
     self.to_avoid_lkas_fault_enabled = self.params.get_bool("AvoidLKASFaultEnabled")
-    self.to_avoid_lkas_fault_max_angle = int(self.params.get("AvoidLKASFaultMaxAngle", encoding="utf8"))
-    self.to_avoid_lkas_fault_max_frame = int(self.params.get("AvoidLKASFaultMaxFrame", encoding="utf8"))
+    self.to_avoid_lkas_fault_max_angle = get_safe_param("AvoidLKASFaultMaxAngle")
+    self.to_avoid_lkas_fault_max_frame = get_safe_param("AvoidLKASFaultMaxFrame")
     self.enable_steer_more = self.params.get_bool("AvoidLKASFaultBeyond")
     self.no_mdps_mods = self.params.get_bool("NoSmartMDPS")
 

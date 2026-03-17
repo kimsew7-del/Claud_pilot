@@ -25,9 +25,9 @@ class LatCtrlToqATOM(LatControlTorque):
     self.params = Params()
     self.sat_count_rate = 1.0 * DT_CTRL
     self.sat_limit = CP.steerLimitTimer
-    self.sat_count = 0. 
-    
-    # we define the steer torque scale as [-1.0...1.0] 
+    self.sat_count = 0.
+
+    # we define the steer torque scale as [-1.0...1.0]
     self.steer_max = 1.0
 
     self.pid = PIDController(TORQUE.kp, TORQUE.ki,
@@ -47,10 +47,10 @@ class LatCtrlLqrATOM(LatControlLQR):
     self.mpc_frame = 0
     self.live_tune_enabled = False
     self.params = Params()
-    self.sat_count_rate = 1.0 * DT_CTRL 
-    self.sat_limit = CP.steerLimitTimer 
-    self.sat_count = 0. 
-    
+    self.sat_count_rate = 1.0 * DT_CTRL
+    self.sat_limit = CP.steerLimitTimer
+    self.sat_count = 0.
+
     # we define the steer torque scale as [-1.0...1.0]
     self.steer_max = 1.0
 
@@ -115,9 +115,9 @@ class LatCtrlIndATOM(LatControlINDI):
 
     self.steer_filter = FirstOrderFilter(0., self.RC, DT_CTRL)
 
-    self.sat_count_rate = 1.0 * DT_CTRL 
-    self.sat_limit = CP.steerLimitTimer 
-    self.sat_count = 0. 
+    self.sat_count_rate = 1.0 * DT_CTRL
+    self.sat_limit = CP.steerLimitTimer
+    self.sat_count = 0.
 
     self.li_timer = 0
     self.live_tune_enabled = False
@@ -140,15 +140,23 @@ class LatCtrlPidATOM(LatControlPID):
 
     self.steer_max = 1.0
 
-    self.sat_count_rate = 1.0 * DT_CTRL 
-    self.sat_limit = CP.steerLimitTimer 
-    self.sat_count = 0. 
+    self.sat_count_rate = 1.0 * DT_CTRL
+    self.sat_limit = CP.steerLimitTimer
+    self.sat_count = 0.
 
 class LaMethod:
   SPEED_LOWDT = 0
   ANGLE_LOWDT = 1
   ANGLE_INTERP = 2
   SPEED_INTERP = 3
+
+# Blending time constant for smooth controller transitions (seconds)
+# At 100Hz control loop, 0.5s gives ~50 frame smooth blend
+BLEND_TIME_CONSTANT = 0.5
+
+# Rate limiter: max torque change per control step (DT_CTRL = 0.01s)
+# 0.05 per step = 5.0/s, allows full range transition in ~0.4s
+MAX_TORQUE_RATE = 0.05 * DT_CTRL / DT_CTRL  # 0.05 per step at 100Hz
 
 
 class LatControlATOM(LatControl):
@@ -172,7 +180,7 @@ class LatControlATOM(LatControl):
     self.multi_lat_spdBP      = list(map(int, Params().get("MultipleLateralSpd", encoding="utf8").split(',')))
     self.multi_lat_angMethod  = list(map(int, Params().get("MultipleLateralOpA", encoding="utf8").split(',')))
     self.multi_lat_angBP      = list(map(int, Params().get("MultipleLateralAng", encoding="utf8").split(',')))
-    
+
     if self.multi_lateral_method == LaMethod.ANGLE_INTERP:
       self.lat_fun0 = self.method_func( self.multi_lat_angMethod[0] )
       self.lat_fun1 = self.method_func( self.multi_lat_angMethod[1] )
@@ -188,9 +196,15 @@ class LatControlATOM(LatControl):
       self.lat_fun1 = None
       self.lat_fun2 = None
       self.latBP = None
-    
+
     self.lat_atom_timer = 0
     self.s_value = 0
+
+    # Smooth blending state for LOWDT modes
+    self.blend_torque_filter = FirstOrderFilter(0., BLEND_TIME_CONSTANT, DT_CTRL)
+    self.blend_angle_filter = FirstOrderFilter(0., BLEND_TIME_CONSTANT, DT_CTRL)
+    self.prev_selected = -1
+    self.prev_output_torque = 0.
 
   def method_func(self, BP ):
     lat_fun = None
@@ -202,7 +216,7 @@ class LatControlATOM(LatControl):
       lat_fun  = self.LaLqr.update
     elif BP == 3:
       lat_fun  = self.LaToq.update
-    return lat_fun       
+    return lat_fun
 
   def reset(self):
     super().reset()
@@ -230,9 +244,44 @@ class LatControlATOM(LatControl):
 
     desired_angle = interp( speed, self.latBP, [desired_angle0, desired_angle1, desired_angle2] )
     output_torque = interp( speed, self.latBP, [output_torque0, output_torque1, output_torque2] )
-    
+
     return output_torque, desired_angle
 
+
+  def _select_lowdt_speed(self, CS):
+    """Select controller for SPEED_LOWDT with immediate value reading."""
+    speed1 = (self.multi_lat_spdBP[0] * (CV.MPH_TO_MS if CS.isMph else CV.KPH_TO_MS))
+    speed2 = (self.multi_lat_spdBP[1] * (CV.MPH_TO_MS if CS.isMph else CV.KPH_TO_MS))
+    v = CS.vEgo
+    if v < speed1:
+      return self.multi_lat_spdMethod[0]
+    elif v < speed2:
+      return self.multi_lat_spdMethod[1]
+    else:
+      return self.multi_lat_spdMethod[2]
+
+  def _select_lowdt_angle(self, CS):
+    """Select controller for ANGLE_LOWDT with immediate value reading."""
+    ang1 = self.multi_lat_angBP[0]
+    ang2 = self.multi_lat_angBP[1]
+    a = abs(CS.steeringAngleDeg)
+    if a < ang1:
+      return self.multi_lat_angMethod[0]
+    elif a < ang2:
+      return self.multi_lat_angMethod[1]
+    else:
+      return self.multi_lat_angMethod[2]
+
+  def _get_output_by_index(self, idx, pid_t, pid_a, ind_t, ind_a, lqr_t, lqr_a, toq_t, toq_a):
+    """Get torque and angle by controller index."""
+    if idx == 0:
+      return pid_t, pid_a
+    elif idx == 1:
+      return ind_t, ind_a
+    elif idx == 2:
+      return lqr_t, lqr_a
+    else:
+      return toq_t, toq_a
 
   def update(self, active, CS, CP, VM, params, last_actuators, desired_curvature, desired_curvature_rate, llk):
     atom_log = log.ControlsState.LateralATOMState.new_message()
@@ -256,6 +305,10 @@ class LatControlATOM(LatControl):
       atom_log.active = False
       if not active:
         self.reset()
+        self.blend_torque_filter.x = 0.
+        self.blend_angle_filter.x = 0.
+        self.prev_selected = -1
+        self.prev_output_torque = 0.
     else:
       if self.multi_lateral_method == LaMethod.SPEED_LOWDT:
         if 2 in self.multi_lat_spdMethod:
@@ -267,20 +320,18 @@ class LatControlATOM(LatControl):
         if 0 in self.multi_lat_spdMethod:
           pid_output_torque, pid_desired_angle, pid_log  = self.LaPid.update( active, CS, CP, VM, params, last_actuators, desired_curvature, desired_curvature_rate, llk )
 
-        speed1 = (self.multi_lat_spdBP[0] * (CV.MPH_TO_MS if CS.isMph else CV.KPH_TO_MS))
-        speed2 = (self.multi_lat_spdBP[1] * (CV.MPH_TO_MS if CS.isMph else CV.KPH_TO_MS))
-        self.lat_atom_timer += 1
-        if self.lat_atom_timer > 300:
-          self.s_value = CS.vEgo
-          self.lat_atom_timer = 0
-        if self.s_value < speed1:
-          selected = self.multi_lat_spdMethod[0]
-        elif speed1 <= self.s_value < speed2:
-          selected = self.multi_lat_spdMethod[1]
-        else:
-          selected = self.multi_lat_spdMethod[2]
-        desired_angle = interp( selected, [0, 1, 2, 3], [pid_desired_angle, ind_desired_angle, lqr_desired_angle, toq_desired_angle] )
-        output_torque = interp( selected, [0, 1, 2, 3], [pid_output_torque, ind_output_torque, lqr_output_torque, toq_output_torque] )
+        # Read speed every frame for immediate controller selection
+        selected = self._select_lowdt_speed(CS)
+        raw_torque, raw_angle = self._get_output_by_index(
+          selected, pid_output_torque, pid_desired_angle,
+          ind_output_torque, ind_desired_angle,
+          lqr_output_torque, lqr_desired_angle,
+          toq_output_torque, toq_desired_angle)
+
+        # Smooth blending via first-order filter to prevent output discontinuity
+        output_torque = self.blend_torque_filter.update(raw_torque)
+        desired_angle = self.blend_angle_filter.update(raw_angle)
+
       elif self.multi_lateral_method == LaMethod.ANGLE_LOWDT:
         if 2 in self.multi_lat_angMethod:
           lqr_output_torque, lqr_desired_angle, lqr_log  = self.LaLqr.update( active, CS, CP, VM, params, last_actuators, desired_curvature, desired_curvature_rate, llk )
@@ -290,20 +341,19 @@ class LatControlATOM(LatControl):
           ind_output_torque, ind_desired_angle, ind_log  = self.LaInd.update( active, CS, CP, VM, params, last_actuators, desired_curvature, desired_curvature_rate, llk )
         if 0 in self.multi_lat_angMethod:
           pid_output_torque, pid_desired_angle, pid_log  = self.LaPid.update( active, CS, CP, VM, params, last_actuators, desired_curvature, desired_curvature_rate, llk )
-        ang1 = self.multi_lat_angBP[0]
-        ang2 = self.multi_lat_angBP[1]
-        self.lat_atom_timer += 1
-        if self.lat_atom_timer > 150:
-          self.s_value = abs(CS.steeringAngleDeg)
-          self.lat_atom_timer = 0
-        if self.s_value < ang1:
-          selected = self.multi_lat_angMethod[0]
-        elif ang1 <= self.s_value < ang2:
-          selected = self.multi_lat_angMethod[1]
-        else:
-          selected = self.multi_lat_angMethod[2]
-        desired_angle = interp( selected, [0, 1, 2, 3], [pid_desired_angle, ind_desired_angle, lqr_desired_angle, toq_desired_angle] )
-        output_torque = interp( selected, [0, 1, 2, 3], [pid_output_torque, ind_output_torque, lqr_output_torque, toq_output_torque] )
+
+        # Read angle every frame for immediate controller selection
+        selected = self._select_lowdt_angle(CS)
+        raw_torque, raw_angle = self._get_output_by_index(
+          selected, pid_output_torque, pid_desired_angle,
+          ind_output_torque, ind_desired_angle,
+          lqr_output_torque, lqr_desired_angle,
+          toq_output_torque, toq_desired_angle)
+
+        # Smooth blending via first-order filter to prevent output discontinuity
+        output_torque = self.blend_torque_filter.update(raw_torque)
+        desired_angle = self.blend_angle_filter.update(raw_angle)
+
       elif self.multi_lateral_method == LaMethod.ANGLE_INTERP:
         selected = 4
         output_torque, desired_angle  =  self.method_angle( active, CS, CP, VM, params, last_actuators, desired_curvature, desired_curvature_rate, llk )
@@ -311,8 +361,14 @@ class LatControlATOM(LatControl):
         selected = 4
         output_torque, desired_angle  =  self.method_speed( active, CS, CP, VM, params, last_actuators, desired_curvature, desired_curvature_rate, llk )
 
+      self.prev_selected = selected
 
+      # Rate limiter: prevent abrupt torque changes between frames
+      output_torque = clip(output_torque,
+                           self.prev_output_torque - MAX_TORQUE_RATE,
+                           self.prev_output_torque + MAX_TORQUE_RATE)
       output_torque = clip( output_torque, -self.steer_max, self.steer_max )
+      self.prev_output_torque = output_torque
 
       # 2. log
       atom_log.active = True

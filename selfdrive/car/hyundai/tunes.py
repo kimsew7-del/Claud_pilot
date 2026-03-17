@@ -5,7 +5,8 @@ from decimal import Decimal
 
 class LongTunes(Enum):
   OPKR = 0
-  OTHER = 1
+  OPKR_HEV = 1
+  OTHER = 2
 
 class LatTunes(Enum):
   INDI = 0
@@ -26,6 +27,7 @@ class LatTunes(Enum):
   PID_M = 15
   TORQUE = 16
   ATOM = 17
+  TORQUE_HEV_SEDAN = 18
 
 ###### LONG ######
 def set_long_tune(tune, name):
@@ -43,6 +45,18 @@ def set_long_tune(tune, name):
     tune.kdBP = [0., 4., 9., 17., 23., 31.]
     #tune.kdV = [0.9, 1.0, 0.85, 0.7, 0.5, 0.4]
     tune.kdV = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    tune.kfBP = [0., 4., 9., 17., 23., 31.]
+    tune.kfV = [1., 1., 1., 1., 1., 1.]
+  elif name == LongTunes.OPKR_HEV:
+    # HEV-optimized tune: smoother regen braking, progressive accel
+    tune.kpBP = [0., 4., 9., 17., 23., 31.]
+    tune.kpV = [0.8, 0.7, 0.6, 0.5, 0.4, 0.35]
+    tune.kiBP = [0., 4., 9., 17., 23., 31.]
+    tune.kiV = [0.18, 0.16, 0.14, 0.12, 0.10, 0.08]
+    tune.deadzoneBP = [0., 4.]
+    tune.deadzoneV = [0., 0.05]
+    tune.kdBP = [0., 4., 9., 17., 23., 31.]
+    tune.kdV = [0.5, 0.6, 0.5, 0.4, 0.3, 0.2]
     tune.kfBP = [0., 4., 9., 17., 23., 31.]
     tune.kfV = [1., 1., 1., 1., 1., 1.]
   else:
@@ -127,6 +141,27 @@ def set_lat_tune(tune, name, max_lat_accel=2.5, FRICTION=.1):
     tune.torque.kp = TorqueKp / max_lat_accel # 2.0/2.5 = 0.8
     tune.torque.kf = TorqueKf / max_lat_accel # 1.0/2.5 = 0.4
     tune.torque.ki = TorqueKi / max_lat_accel # 0.5/2.5 = 0.2
+    tune.torque.friction = TorqueFriction
+    tune.torque.steeringAngleDeadzoneDeg = steer_ang_deadzone
+  elif name == LatTunes.TORQUE_HEV_SEDAN:
+    # Optimized for heavy HEV sedans (Grandeur IG, K7 HEV): heavier steering, higher inertia
+    # Lower maxLatAccel for larger, heavier vehicles; higher friction for EPS feel
+    TorqueKp = float(Decimal(params.get("TorqueKp", encoding="utf8")) * Decimal('0.1'))
+    TorqueKf = float(Decimal(params.get("TorqueKf", encoding="utf8")) * Decimal('0.1'))
+    TorqueKi = float(Decimal(params.get("TorqueKi", encoding="utf8")) * Decimal('0.1'))
+    TorqueFriction = float(Decimal(params.get("TorqueFriction", encoding="utf8")) * Decimal('0.001'))
+    TorqueUseAngle = params.get_bool('TorqueUseAngle')
+    max_lat_accel = float(Decimal(params.get("TorqueMaxLatAccel", encoding="utf8")) * Decimal('0.1'))
+    steer_ang_deadzone = float(Decimal(params.get("TorqueAngDeadZone", encoding="utf8")) * Decimal('0.1'))
+    # Apply HEV sedan adjustments: scale down maxLatAccel, increase friction
+    max_lat_accel = max(max_lat_accel * 0.85, 1.5)  # reduce for heavier vehicle dynamics
+    TorqueFriction = min(TorqueFriction * 1.3, 0.2)  # increase for heavier EPS
+    steer_ang_deadzone = max(steer_ang_deadzone, 1.0)  # minimum 1.0 deg deadzone for highway stability
+    tune.init('torque')
+    tune.torque.useSteeringAngle = TorqueUseAngle
+    tune.torque.kp = TorqueKp / max_lat_accel
+    tune.torque.kf = TorqueKf / max_lat_accel
+    tune.torque.ki = TorqueKi / max_lat_accel
     tune.torque.friction = TorqueFriction
     tune.torque.steeringAngleDeadzoneDeg = steer_ang_deadzone
   elif name == LatTunes.LQR:
