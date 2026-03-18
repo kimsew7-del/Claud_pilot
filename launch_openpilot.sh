@@ -1,5 +1,13 @@
 #!/usr/bin/bash
 
+# install default presets if not exist
+if [ ! -f "/data/preset1" ]; then
+    cp /data/openpilot/selfdrive/assets/addon/script/preset1_default /data/preset1
+fi
+if [ ! -f "/data/preset2" ]; then
+    cp /data/openpilot/selfdrive/assets/addon/script/preset2_default /data/preset2
+fi
+
 # prebuilt recreate
 if [ -f "/data/opkr_compiling" ]; then
     rm -f /data/opkr_compiling
